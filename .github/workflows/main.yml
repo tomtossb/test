@@ -1,0 +1,98 @@
+#  运行脚本前请先创建网络:
+#  docker network create --driver=bridge kykms_network
+
+version: '3'
+
+services:
+  kykms-mysql:
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_ROOT_HOST: '%'
+      TZ: Asia/Shanghai
+    restart: always
+    container_name: kykms-mysql
+    image: registry.cn-guangzhou.aliyuncs.com/kyxxjs/kykms-mysql:5.7
+    volumes:
+      - ./docker/mysql/conf/mysqld.cnf:/etc/mysql/conf.d/source/mysqld.cnf
+      - ./docker/mysql/data:/var/lib/mysql
+      - ./docker/mysql/log:/var/log/mysql
+    command:
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_general_ci
+      --explicit_defaults_for_timestamp=true
+      --lower_case_table_names=1
+      --max_allowed_packet=128M
+    ports:
+      - 3306:3306
+    networks:
+      kykms_network:
+      driver: nat
+
+  kykms-redis:
+    image: registry.cn-guangzhou.aliyuncs.com/kyxxjs/kykms-redis:6.0
+    ports:
+      - 6379:6379
+    restart: always
+    container_name: kykms-redis
+    volumes:
+      - ./docker/redis/conf:/etc/redis
+    command: [ "redis-server", "/etc/redis/redis.conf" ]
+    networks:
+      kykms_network:
+
+  kykms-ES:
+    image: registry.cn-guangzhou.aliyuncs.com/kyxxjs/kykms-es:7.6.1
+    restart: always
+    container_name: kykms-ES
+    volumes:
+      - ./docker/elasticsearch/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml
+      - ./docker/elasticsearch/config/jvm.options:/usr/share/elasticsearch/config/jvm.options
+      - ./docker/elasticsearch/data:/usr/share/elasticsearch/data
+      - ./docker/elasticsearch/logs:/usr/share/elasticsearch/logs
+    ports:
+      - 9200:9200
+      - 9300:9300
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      kykms_network:
+
+  kykms:
+    image: registry.cn-guangzhou.aliyuncs.com/kyxxjs/kykms:qj
+    container_name: kykms
+    environment:
+      - TZ=Asia/Shanghai
+      - LANG=en_US.UTF-8
+    volumes:
+#      - ./docker/kykms:/usr/local/kykms
+      - ./docker/kykms/config:/usr/local/kykms/config
+      - ./docker/kykms/kmDocs:/usr/local/kykms/kmDocs
+    depends_on:
+      - kykms-mysql
+      - kykms-redis
+      - kykms-ES
+    ports:
+      - "8080:8080"
+    networks:
+      kykms_network:
+    restart: always
+    command: java -noverify -Dloader.path=./lib -jar ./jeecg-boot-module-system-2.4.5.jar ./catalina.out 2>&1 &
+
+  kykms-nginx:
+    image: registry.cn-guangzhou.aliyuncs.com/kyxxjs/kykms-nginx:qj
+    depends_on:
+      - kykms
+    container_name: kykms-nginx
+    ports:
+      - "80:80"
+    volumes:
+#      - ./docker/nginx/kykms-root/:/usr/share/nginx/kykms-root
+      - ./docker/nginx/conf.d/:/etc/nginx/conf.d/
+      - ./docker/nginx/log:/var/log/nginx
+    networks:
+      kykms_network:
+    restart: always
+
+networks:
+  kykms_network:
+    external: true
